@@ -1,0 +1,55 @@
+# Local settings and credentials (examples are safe to commit)
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# JavaScript dependencies and build outputs; keep package-lock.json
+node_modules/
+dist/
+dist-ssr/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.ipynb_checkpoints/
+
+# User files, local test pictures, databases and exports
+/backend/uploads/
+/backend/pictures/
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+*.dump
+
+# Logs, temporary files and local editor settings
+logs/
+*.log
+*.pid
+*.tmp
+*.bak
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
