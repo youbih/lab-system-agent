@@ -1,8 +1,25 @@
 # JWT 用户认证：从概念到代码实现
 
+> 对应课程：第 06 节
 > 对应项目:`agent-lab/lab-system-agent/backend`
 > 前置知识:FastAPI 基础路由、SQLAlchemy 基本查询、依赖注入(Depends)
-> 阅读时间:约 40 分钟 · 建议配合实际代码边看边试
+> 阅读建议：按小节阅读，配合项目源码与示例理解执行过程。
+
+---
+
+## 阅读说明：代码版本与讲解方式
+
+这份笔记根据原课程记录与当前项目源码整理，不代表拥有每节课的完整历史快照。保留原记录中的课程重点和排错经历；历史代码、当前实现、建议改进会分别说明。未在对话或原记录中确认的测试，不写成新增的实测结论。
+
+代码按“完整片段 → 按执行顺序拆解 → 输入/返回值例子 → 页面或接口效果”阅读。仅有一两行的导入、配置或重复片段使用紧接代码的说明，避免反复展开相同逻辑。
+
+**本节版本对应：** 第 06 节的登录 API 仍是业务与路由写在一起的历史代码；当前登录业务见 `services/auth_services.py`。查询个人资料历史路径为 `/api/user/info`，当前为 `/api/user/me`。
+
+---
+
+## 第零章 这节课干了什么
+
+实现后端登录、密码哈希、JWT 签发与受保护接口的身份验证。前端登录联调主要在第 08 节，Service 分层在第 09 节，管理员鉴权在第 13 节，不混写为本节新增功能。
 
 ---
 
@@ -28,7 +45,7 @@
 
 ## 第二章 从"固定口令"到 JWT
 
-### 2.1 最原始的方案:固定 token
+### 2.1 最原始的方案：固定 token
 
 如果你在之前的练习里写过鉴权，大概长这样：
 
@@ -37,6 +54,9 @@ VALID_TOKEN = "secret-token"
 if credentials.credentials != VALID_TOKEN:
     raise HTTPException(401, "token 无效")
 ```
+
+**这段代码怎样执行：** 这是固定口令方案的历史示意。先设定一个共享字符串，再比较请求携带的字符串；不一致就抛出 HTTP 异常，当前函数停止执行。`credentials` 来自此前的鉴权依赖，这个片段并没有创建它。它不能区分不同用户，不是当前 JWT 实现。
+
 
 它能用，但有三个致命问题：
 
@@ -48,7 +68,7 @@ if credentials.credentials != VALID_TOKEN:
 
 ### 2.2 JWT 的思路：把"身份信息"签进 token 里
 
-JWT(JSON Web Token)是一段**自带内容、且无法伪造**的字符串。长这样：
+JWT(JSON Web Token)是一段**自带内容、可验证签名**的字符串。长这样：
 
 ```
 eyJhbGciOiJIUzI1NiJ9   .   eyJ1c2VyX2lkIjoxLCJleHAiOjE3OT...   .   JsSXp1BFoR5y9quq...
@@ -56,11 +76,11 @@ eyJhbGciOiJIUzI1NiJ9   .   eyJ1c2VyX2lkIjoxLCJleHAiOjE3OT...   .   JsSXp1BFoR5y9
      (用什么算法签名)         (装的内容:user_id、过期时间)            (防伪印章)
 ```
 
-三段都是 Base64 编码，用 `.` 连接。
+头部和载荷使用 Base64URL 编码，签名字节也编码后展示，三部分用 `.` 连接。这种编码不保密；防篡改依赖密钥和签名校验。
 
 **关键性质(必考):**
 
-1. **载荷是"明文"的** —— 任何人都能解码看到内容。所以绝不放密码等敏感信息；放 `user_id`、`role` 这种没问题
+1. **载荷是"明文"的** —— 任何人都能解码看到内容。所以绝不放密码等敏感信息；当前载荷只放用户 ID 与过期时间；其他信息要按暴露风险决定
 2. **签名是防伪的** —— 签名用"只有服务器知道的密钥"计算，任何人篡改载荷后，签名就对不上了，验签直接失败
 3. **自包含、无状态** —— 后端不用存"谁登录着"，验签即可。这是它区别于传统 Session 的核心
 
@@ -74,7 +94,7 @@ eyJhbGciOiJIUzI1NiJ9   .   eyJ1c2VyX2lkIjoxLCJleHAiOjE3OT...   .   JsSXp1BFoR5y9
 
 ---
 
-## 第三章 密码哈希:bcrypt
+## 第三章 密码哈希：bcrypt
 
 在讲登录之前，先解决一个前置问题：**数据库里的密码长什么样？**
 
@@ -87,7 +107,7 @@ eyJhbGciOiJIUzI1NiJ9   .   eyJ1c2VyX2lkIjoxLCJleHAiOjE3OT...   .   JsSXp1BFoR5y9
 验证时:         用户输入 "示例密码" --同样的算法--> 与库里的比对
 ```
 
-注意方向不可逆：**从哈希推不出明文**。验证时不是"解密"，而是"重新算一遍再比对"。
+注意方向不可逆：**从哈希推不出明文**。验证时不是解密，而是由 `checkpw` 根据已存哈希携带的盐和参数验证明文。不能重新随机生成哈希后直接比较字符串。
 
 ### 3.2 代码实现(`app/utils/password.py`)
 
@@ -102,6 +122,35 @@ def verify_password(password: str, hashed_password: str) -> bool:
     """验证密码(登录时用)"""
     return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
 ```
+
+**按执行顺序拆解：**
+
+#### 第一步：接收明文并转成字节
+
+```python
+password.encode("utf-8")
+```
+
+`hash_password`、`verify_password` 都是项目自己定义的函数。输入的 Python 字符串先编码成 bytes，因为 bcrypt 的这些接口接收字节。`password: str` 和 `-> str`/`-> bool` 是类型注解，不是在调用时自动生成密码。
+
+#### 第二步：生成盐并计算哈希
+
+```python
+bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+```
+
+`gensalt()` 生成随机盐，`hashpw()` 计算包含盐和参数信息的哈希，最后 `decode()` 转成可存入字符串列的文本。比如注册时输入某个测试密码，数据库保存的是 bcrypt 哈希，而不是该明文。
+
+#### 第三步：验证输入是否匹配已存哈希
+
+```python
+bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
+```
+
+`password` 是登录时用户本次输入，`hashed_password` 是数据库已有值。`checkpw()` 根据已存哈希中的盐和参数检查是否匹配，返回 `True` 或 `False`。不是先解密，也不是重新随机生成一份哈希后直接比较文本。
+
+**把结果连起来：** 注册/改密码调用 `hash_password` 保存；登录/校验原密码调用 `verify_password` 判断。
+
 
 两个细节：
 
@@ -130,11 +179,51 @@ def decode_access_token(token: str) -> dict:
     return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=settings.JWT_ALGORITHM)
 ```
 
+**按执行顺序拆解：**
+
+#### 第一步：读取配置并计算过期时刻
+
+```python
+expire = datetime.now() + timedelta(hours=settings.JWT_EXPIRE_HOURS)
+```
+
+`datetime`、`timedelta` 来自 Python 标准库，`jwt` 来自 PyJWT，`settings` 是项目配置对象。这里计算过期时刻；配置默认时长为 24 小时，但环境变量可以覆盖。当前源码使用无时区的 `datetime.now()`，后续可统一使用 UTC 时区明确的时间来避免时区解释差异；本次只说明，没有改源码。
+
+#### 第二步：构造载荷字典
+
+```python
+payload = {"user_id": user_id, "exp": expire}
+```
+
+假设登录用户 ID 为 3，载荷里的 `user_id` 就是 3；`exp` 是过期时间。载荷不包含密码，也不会通过用户名自动查数据库，因为用户身份已在调用这个函数之前确认。
+
+#### 第三步：签名后返回字符串
+
+```python
+return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+```
+
+`jwt.encode` 是库函数，`create_access_token` 是项目函数。库使用服务端密钥和配置算法生成签名，返回 token 字符串；载荷编码不等于加密，不能把敏感明文放进去。
+
+#### 第四步：请求时验证并读回字典
+
+```python
+return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=settings.JWT_ALGORITHM)
+```
+
+`decode_access_token` 接收之后请求携带的 token。库验证签名和过期时间，成功则返回载荷字典；失败抛异常，由鉴权依赖统一转为登录失效响应。当前接口没有在这里比较密码。
+
+**把结果连起来：** 登录时生成字符串；后续请求把它放在 Authorization 头中，由后端解码验证并取得用户 ID。
+
+
 ### 逐行理解 `create_access_token`
 
 ```python
 expire = datetime.now() + timedelta(hours=settings.JWT_EXPIRE_HOURS)
 ```
+
+**这段代码怎样执行：** 这是上面函数的局部片段：右边先计算“现在加有效时长”，左边 `expire` 保存结果。它只产生一个时间值，此时还没有生成 token，也没有写入数据库。
+
 
 过期时间 = 现在 + 配置的小时数。token 泄露后，攻击者最多用到这个时间为止。
 
@@ -142,11 +231,17 @@ expire = datetime.now() + timedelta(hours=settings.JWT_EXPIRE_HOURS)
 payload = {"user_id": user_id, "exp": expire}
 ```
 
+**这段代码怎样执行：** Python 字典的键是 `"user_id"`、`"exp"`，值取自函数参数和上一行的时间变量。不同用户的 ID 不同；即使同一用户密码未变，登录时的过期时刻也可能不同，因此 token 也可能不同。
+
+
 载荷：装什么由你定。最少要有"是谁"(user_id）和"何时过期"(exp)。
 
 ```python
 jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=...)
 ```
+
+**这段代码怎样执行：** 这行是签名调用的结构示意，`algorithm=...` 中的省略号不是项目实际配置。实际源码传入 `settings.JWT_ALGORITHM`。返回的是字符串，不是密码哈希；密钥来自后端配置，不能提交真实值到笔记。
+
 
 用密钥签名，产出最终字符串。**这个密钥就是整个系统的命根子。**
 
@@ -163,7 +258,7 @@ jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=...)
 
 ## 第五章 登录接口(`app/api/auth.py`)
 
-现在把前面两件武器组装起来。**登录是账号密码唯一出现的地方**，之后全程用 token。
+现在把前面两件武器组装起来。本节的普通受保护请求通过 token 识别身份，登录时提交账号密码；后续注册和修改密码也会提交相应密码字段。
 
 ```python
 @router.post("/login")
@@ -190,6 +285,45 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     }
 ```
 
+**按执行顺序拆解：**
+
+#### 第一步：匹配登录接口并取得参数
+
+```python
+@router.post("/login")
+def login(data: LoginRequest, db: Session = Depends(get_db)):
+```
+
+这是第 06 节将业务写在 API 函数中的历史版本。装饰器声明 POST 路径；FastAPI 将 JSON 请求体解析成 `LoginRequest`，通过 `get_db` 提供会话。当前代码在第 09 节之后把业务移到了 `auth_services.login`，下列业务顺序仍可对照理解。
+
+#### 第二步：按账号找用户
+
+```python
+user = db.query(User).filter(User.username == data.username).first()
+```
+
+`data.username` 是本次输入的账号；`first()` 执行查询，返回一个 `User` ORM 对象或 `None`。不要把它理解成 JSON 用户列表。
+
+#### 第三步：检查密码和状态
+
+```python
+if not user or not verify_password(data.password, user.password):
+    return {"code": 400, "message": "账号或密码错误"}
+```
+
+Python 的 `or` 有短路行为：用户不存在时，不会继续读取 `user.password`。用户存在才用 bcrypt 校验。密码通过后再检查 `status`，禁用用户不会拿到 token。这里返回字典是历史写法，当前对应分支抛 `BusinessException`。
+
+#### 第四步：签发并返回登录结果
+
+```python
+token = create_access_token(user_id=user.id)
+```
+
+身份确认后才签发 token。`UserResponse.model_validate(user)` 从 ORM 属性读取对外允许的字段；最终返回业务码、消息，以及包含 token 和用户资料的 data。前端拿到后才能保存登录状态。
+
+**把结果连起来：** 输入账号密码 → 查到用户 → 验密码与状态 → 生成 token → 返回登录结果；任何失败分支都会提前结束。
+
+
 ### 设计细节解读
 
 **为什么①和②合并成一句"账号或密码错误"？**
@@ -213,6 +347,9 @@ token 里的 user_id 必须对应一个真实、启用的用户，否则签出�
 ```python
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 ```
+
+**这段代码怎样执行：** `OAuth2PasswordBearer` 是 FastAPI 提供的工具，`oauth2_scheme` 是我们创建的依赖对象。把它放进 `Depends(...)` 后，框架从请求头提取 Bearer token。`tokenUrl` 指定文档授权流程使用的登录入口，并不会替每次业务请求重新登录。
+
 
 声明："token 从请求头 `Authorization: Bearer xxx` 里取"。`Depends(oauth2_scheme)` 会自动完成这个动作。`tokenUrl` 只影响 Swagger 文档的 Authorize 按钮行为。
 
@@ -240,7 +377,50 @@ def get_current_user(
     return user
 ```
 
-**关卡三存在的理由**:JWT 的软肋是"签发后无法主动作废"。查库这步让管理员禁用账号后立即生效，用一次查询换来"可撤销"。
+**按执行顺序拆解：**
+
+#### 第一步：先由依赖提供 token 和数据库会话
+
+```python
+token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+```
+
+FastAPI 在调用函数前准备参数。`get_current_user` 是项目函数；`Depends` 是框架工具。缺少所需认证信息时，可能在进入函数体前就被认证依赖拒绝。
+
+#### 第二步：验证签名与有效期
+
+```python
+try:
+    payload = decode_access_token(token)
+except Exception:
+    raise HTTPException(401, "登录已失效，请重新登录")
+```
+
+成功时 `payload` 是字典；失败时抛出 HTTP 401，不会再往下查询。`try/except` 是处理异常的 Python 语法，不是另一次网络请求。
+
+#### 第三步：从载荷取用户 ID
+
+```python
+user_id = payload.get("user_id")
+```
+
+`dict.get()` 在键不存在时返回 `None`。后面的 `if not user_id` 会拒绝缺少身份标识的载荷；这里没有使用前端额外传来的 user_id。
+
+#### 第四步：查库并返回当前用户
+
+```python
+user = db.query(User).filter(User.id == user_id).first()
+if not user or user.status != 1:
+    raise HTTPException(401, "用户被禁用")
+return user
+```
+
+查询当前账号是否仍存在、状态是否为正常。成功返回的是 `User` 对象，FastAPI 将它注入业务接口的 `current_user` 参数。禁用账号会使其后续受保护请求被拒绝；这不等于建立了所有单个 JWT 的撤销机制。
+
+**把结果连起来：** 认证依赖返回用户对象，业务接口复用它；不需要每个接口重写一套解析 token 的代码。
+
+
+**关卡三存在的理由**:JWT 的软肋是"不增加服务端状态时难以单独撤销一个已签发 token"。查库这步让管理员禁用账号后立即生效，用数据库状态控制账号的后续访问；不是将 token 自身从全系统销毁。
 
 ### 6.3 它什么时候执行
 
@@ -251,6 +431,9 @@ def get_current_user(
 def get_user_info(current_user: User = Depends(get_current_user)):
     ...
 ```
+
+**这段代码怎样执行：** 这个带省略号的片段只演示依赖挂载位置，不是完整业务实现。`Depends(get_current_user)` 会先执行鉴权，再将返回的 ORM 用户对象赋给 `current_user`。历史路径 `/info` 对应当前源码中的 `/me`。
+
 
 请求到达 → FastAPI 先执行 `get_current_user` → 三关全过，`return user` 的结果塞进 `current_user` 参数 → 业务函数才开始跑。任何一关 raise，业务函数压根不会执行。
 
@@ -273,13 +456,42 @@ def get_user_info(current_user: User = Depends(get_current_user)):
     }
 ```
 
+**按执行顺序拆解：**
+
+#### 第一步：拼接接口路径
+
+```python
+router = APIRouter(prefix="/user", tags=["用户信息"])
+```
+
+`APIRouter` 是 FastAPI 的路由分组工具。历史的 `/info` 与 `/user`、总路由 `/api` 拼成 `/api/user/info`；当前路径已统一成 `/api/user/me`。
+
+#### 第二步：先获取当前用户
+
+```python
+current_user: User = Depends(get_current_user)
+```
+
+这是参数声明，不是手动调用；鉴权通过才进入函数体。它决定要读取哪个用户，无需接受客户端任意指定的账号 ID。
+
+#### 第三步：转换成响应数据
+
+```python
+UserResponse.model_validate(current_user)
+```
+
+从数据库对象提取响应模型声明的属性，作为 data 返回。例如 ORM 对象带 password，但响应模型没有该字段，就不会作为用户响应字段输出密码。当前源码还会通过 service 和 Response.success 包装，这是后续课程的重构。
+
+**把结果连起来：** 浏览器携带 token 查询自己的资料，数据库对象先转成响应模型，再由框架序列化。
+
+
 注意这个函数里**没有任何一行鉴权代码** —— 鉴权全部外包给了依赖。想给新接口加保护，只需在参数里加 `Depends(get_current_user)`，一行搞定。
 
 ---
 
 ## 第八章 全景流程图
 
-### 第一次交互：登录(账号密码只出现这一次)
+### 第一次交互：登录并获取 token
 
 ```
 前端                    后端
@@ -311,13 +523,15 @@ def get_user_info(current_user: User = Depends(get_current_user)):
 
 ### 类比
 
-- 账号密码 = 身份证：只在入场登记时出示一次
+- 账号密码用于登录确认身份；普通受保护查询之后携带 token，密码修改仍会提交原/新密码
 - JWT = 工牌：进门后全程刷它；工牌上有防伪章（签名）和有效期（exp)
 - 守门员查库 = 闸机联网确认"这人没离职"
 
 ---
 
-## 第九章 自己验证一遍(分支覆盖)
+## 第九章 验证步骤（使用当前接口）
+
+以下为可执行思路与预期分支，不表示本次文档修订重新执行了测试。使用测试账号，替换密码/token 占位值；状态修改会写数据库，确认对象后再操作。
 
 登录函数有 4 条路径，每条都能用 curl 验证：
 
@@ -332,10 +546,10 @@ curl -X POST http://127.0.0.1:8000/api/auth/login -H "Content-Type: application/
 curl -X POST http://127.0.0.1:8000/api/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"YOUR_TEST_PASSWORD"}'
 
 # 守门员:带 token 访问 → 200
-curl http://127.0.0.1:8000/api/user/info -H "Authorization: Bearer <token>"
+curl http://127.0.0.1:8000/api/user/me -H "Authorization: Bearer <token>"
 
 # 守门员:不带 token → 401
-curl http://127.0.0.1:8000/api/user/info
+curl http://127.0.0.1:8000/api/user/me
 
 # 守门员:篡改 token 一位 → 401(验签失败)
 ```
@@ -390,4 +604,4 @@ HTTP 请求分三部分：请求行、请求头、请求体。账号密码是"�
 - [ ] 能口述守门员的三道关卡，以及关卡三为什么必要
 - [ ] 能用 curl 独立完成"登录 → 带 token 访问 → 不带 token 看 401"
 - [ ] 能解释 401 和 403 的区别
-- [ ] 能解释"账号密码只用一次，之后全程刷 token"
+- [ ] 能解释登录提交密码、普通查询携带 token，以及当前改密码不撤销旧 token 的边界

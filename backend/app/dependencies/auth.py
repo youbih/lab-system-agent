@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.database import get_db
 from app.utils.jwt import decode_access_token
+from app.common.exceptions import BusinessException
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
@@ -32,3 +33,10 @@ def get_current_user(
                     status_code=status.HTTP_401_UNAUTHORIZED,detail="用户被禁用"
         )
     return user
+
+# 因为有一些操作要管理员才能执行，所以就需要验证是不是管理员身份
+
+def get_current_admin(current_user:User =Depends(get_current_user)) ->User:
+        if current_user.role!="admin":
+             raise BusinessException(message="无权限访问",code=403)
+        return current_user

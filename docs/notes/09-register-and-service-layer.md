@@ -5,7 +5,17 @@
 > 涉及文件:
 > - 前端:`src/views/Register.vue`、`src/api/auth.js`
 > - 后端:`app/schemas/auth.py`、`app/api/auth.py`、`app/services/auth_services.py`(新增!)
-> 阅读时间:约 30 分钟
+> 阅读建议：按小节阅读，配合项目源码与示例理解执行过程。
+
+---
+
+## 阅读说明：代码版本与讲解方式
+
+这份笔记根据原课程记录与当前项目源码整理，不代表拥有每节课的完整历史快照。保留原记录中的课程重点和排错经历；历史代码、当前实现、建议改进会分别说明。未在对话或原记录中确认的测试，不写成新增的实测结论。
+
+代码按“完整片段 → 按执行顺序拆解 → 输入/返回值例子 → 页面或接口效果”阅读。仅有一两行的导入、配置或重复片段使用紧接代码的说明，避免反复展开相同逻辑。
+
+**本节版本对应：** 注册与登录服务当前仍在 auth_services.py。页面提交讲解采用当前 Register.vue；普通注册固定为学生身份。原笔记保留的前后重构示例用于理解演变，不表示它们应同时复制进源码。
 
 ---
 
@@ -35,7 +45,7 @@ utils/request.js(请求层)
    ═══════════ 前后端连接点 ═══════════
    HTTP POST http://localhost:8000/api/auth/register
    ├─ 网络路径:浏览器 → VSCode 端口转发 → 集群 FastAPI
-   ├─ 前置检查:CORS 预检(后端白名单放行 5173)
+   ├─ 浏览器直连跨源接口时按 CORS 检查；同源 Vite 代理走另一条路径
    └─ 契约一致:URL+方法、JSON 格式、统一返回格式
    ═══════════════════════════════════
    │
@@ -54,13 +64,13 @@ MySQL(用户落库,密码是 60 位哈希)
 
 ---
 
-## 第一章 前端:注册页(Register.vue)
+## 第一章 前端：注册页(Register.vue)
 
 ### 1.1 和登录页的关系
 
 注册页 = 登录页的"加长版":多一个确认密码框 + 自定义校验规则。整体结构(container/box/form）完全一样。
 
-### 1.2 核心新增:自定义校验器(两次密码一致)
+### 1.2 核心新增：自定义校验器(两次密码一致)
 
 固定规则（`required`）不够用时的武器:
 
@@ -84,27 +94,107 @@ const rules = {
 }
 ```
 
+**按执行顺序拆解：**
+
+#### 第一步：定义校验器，交给表单调用
+
+```javascript
+const validatePass = (rule, value, callback) => {
+```
+
+validatePass 是项目自定义函数，不是 Vue 内置函数。把它配置在 confirmPassword 的 validator 后，Element Plus 调用它，value 就是确认密码输入框当前的值。rule 是当前规则，callback 是报告校验结果的函数。
+
+#### 第二步：拒绝空值
+
+```javascript
+if (value === "") {
+  callback(new Error("请确认密码"))
+}
+```
+
+确认密码为空时，创建错误对象交给 callback，告诉表单此项未通过。这里没有向后端发请求，也没有在数据库写入任何内容。
+
+#### 第三步：比较两次密码
+
+```javascript
+if (value !== form.password) {
+  callback(new Error("两次密码输入不一致"))
+} else {
+  callback()
+}
+```
+
+form.password 是第一次输入，value 是确认输入。不同就失败，相同就用不带参数的 callback 报告通过；例如第一次填测试密码 A、确认填 B，会被挡住。每条实际执行分支只调用一次 callback。
+
+**把结果连起来：** 校验器只负责确认两次输入一致；账号是否重名和密码是否入库由后端决定。
+
+
 **理解 callback 的约定**:`callback()` = 通过;`callback(new Error('...'))` = 失败并显示消息。这是 Element Plus 校验器的固定协议。
 
 ### 1.3 提交逻辑(沿用上节课的最佳实践)
 
 ```javascript
 const register = async () => {
-  const valid = await formRef.value.validate().catch(() => false)  // 校验
-  if (!valid) return                                               // 不过就 return
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
 
   loadingValue.value = true
   try {
     const res = await registerApi(form)
+
     if (res.code === 200) {
       ElMessage.success('注册成功')
-      await router.push('/login')      // 注册成功 → 跳登录页
+      await router.push('/login')
     }
   } finally {
     loadingValue.value = false
   }
 }
 ```
+
+**按执行顺序拆解：**
+
+#### 第一步：先执行完整表单校验
+
+```javascript
+const valid = await formRef.value.validate().catch(() => false)
+if (!valid) return
+```
+
+formRef 引用 el-form 实例，validate 检查账号/密码必填和确认密码。失败转换为 false，然后退出 register，不显示成功也不发送请求。
+
+#### 第二步：开启按钮加载并提交
+
+```javascript
+loadingValue.value = true
+const res = await registerApi(form)
+```
+
+第一句在 try 前，第二句在 try 内。页面按钮绑定 loadingValue；registerApi 是自定义 API 封装，发送 POST /api/auth/register。此处直接传整个 form，包括 confirmPassword；当前后端 schema 默认忽略这个额外字段，不会将它存为密码列。
+
+#### 第三步：成功后提示并去登录
+
+```javascript
+if (res.code === 200) {
+  ElMessage.success("注册成功")
+  await router.push("/login")
+}
+```
+
+响应拦截器已经返回业务 JSON，因此判断 res.code。注册成功不等于自动登录：本函数没有保存 token，而是提示后让用户登录。账号重名时业务码非 200，不执行这个分支。
+
+#### 第四步：所有路径恢复按钮
+
+```javascript
+finally {
+  loadingValue.value = false
+}
+```
+
+请求抛出异常时也能结束按钮加载。finally 做收尾，不能把它理解成捕获错误；错误显示主要由公共请求层负责。
+
+**把结果连起来：** 点注册 → 校验 → 发请求 → 成功则跳登录 → 按钮恢复；表单失败时则在最前面结束。
+
 
 这套"校验前置 + 提前 return + try/finally 复位"就是上次优化出来的模板，直接复用。
 
@@ -118,13 +208,16 @@ const register = async () => {
 <router-link to="/login">登录</router-link>
 ```
 
-区别:`<a>` 会让浏览器重新加载整个应用（白闪 + 状态丢失）;`<router-link>` 只切换组件（无刷新、毫秒级）。单页应用（SPA）里页面间跳转永远用 `router-link`。
+**这段代码怎样执行：** 两行是导航方案对照，实际使用其中一种。a 的 href 由浏览器执行普通页面导航，可能重新加载整个应用；router-link 使用已注册的 Vue Router 切换组件。to="/login" 对应的是页面路由，不是后端的登录接口路径。
+
+
+区别：普通内部链接可能重新加载整个应用；router-link 进行路由导航，保留当前单页应用环境。内部导航通常用 router-link 或 router.push，外部网址、下载等仍可使用普通链接。
 
 ---
 
-## 第二章 后端:注册接口的三层
+## 第二章 后端：注册接口的三层
 
-### 2.1 契约层:RegisterRequest(schemas/auth.py)
+### 2.1 契约层：RegisterRequest(schemas/auth.py)
 
 ```python
 class RegisterRequest(BaseModel):
@@ -133,9 +226,35 @@ class RegisterRequest(BaseModel):
     name: str | None = None      # 可选字段:不给就是 None
 ```
 
+**按执行顺序拆解：**
+
+#### 第一步：声明必填字段
+
+```python
+username: str
+password: str
+```
+
+RegisterRequest 是 Pydantic 请求模型，FastAPI 用它解析 JSON。两项无默认值，必须提供；缺少时会进入第 07 节的请求参数异常处理器，业务注册函数不会继续执行。
+
+#### 第二步：声明可选名称
+
+```python
+name: str | None = None
+```
+
+允许 name 为字符串或 None，并提供默认 None。前端只提交账号密码时，service 可以使用账号做名称。这里还没有给字段配置长度等额外限制。
+
+#### 第三步：区分输入与数据库模型
+
+请求模型只说明允许接收什么，User 是数据库表模型。当前请求模型没有 role/status 字段，service 自己指定学生和正常状态，不由普通注册者选择管理员身份。
+
+**把结果连起来：** POST JSON 先变成 RegisterRequest，业务层再决定怎样创建 User。
+
+
 `str | None = None` 的含义:类型可以是字符串或 None,默认 None —— 前端的表单里没有"姓名"字段也能通过校验。
 
-### 2.2 接口层:api/auth.py
+### 2.2 接口层：api/auth.py
 
 ```python
 @router.post("/register")
@@ -145,9 +264,39 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
     return Response.success(message="注册成功")
 ```
 
+**按执行顺序拆解：**
+
+#### 第一步：声明接口与依赖
+
+```python
+@router.post("/register")
+def register(data: RegisterRequest, db: Session = Depends(get_db)):
+```
+
+总路径是 /api/auth/register。data 来自 JSON，db 来自会话依赖；RegisterRequest 和服务模块都要导入。此函数不是 Vue 的 register，而是后端路由函数，同名不代表同一个函数。
+
+#### 第二步：把业务交给服务函数
+
+```python
+auth_services.register(db, data)
+```
+
+API 将会话和已解析参数传给 service。service 在发现重名时 raise；异常会阻止下一句成功响应，交给全局异常处理器。正常返回时才继续。
+
+#### 第三步：构造成功响应
+
+```python
+return Response.success(message="登录成功喵")
+```
+
+这句按当前源码展示，文案仍保留了复制痕迹，实际动作是注册。注册 service 没有显式返回用户对象，因此接口也不返回 token，data 默认 null。可后续把消息改成“注册成功”，本次不改业务源码。
+
+**把结果连起来：** 接口层不再自己查重或算哈希，专注请求与响应。
+
+
 接口层只剩两行:调 service、包响应。这就是分层的目标状态。
 
-### 2.3 业务层:services/auth_services.py(本课核心)
+### 2.3 业务层：services/auth_services.py(本课核心)
 
 ```python
 def register(db: Session, data: RegisterRequest):
@@ -170,6 +319,52 @@ def register(db: Session, data: RegisterRequest):
     db.commit()
 ```
 
+**按执行顺序拆解：**
+
+#### 第一步：根据账号查询并检查重名
+
+```python
+user = db.query(User).filter(User.username == data.username).first()
+if user:
+    raise BusinessException(message="账户已存在")
+```
+
+first() 返回 ORM 对象或 None。已有对象就抛业务异常，后面创建与提交都不会执行。当前异常没有显式传 code，沿用默认业务码 500；这不是数据库连接出错。
+
+#### 第二步：构造待保存的 User 对象
+
+```python
+user_model = User(
+    username=data.username,
+    password=hash_password(data.password),
+    name=data.name or data.username,
+    role="student",
+    status=1
+)
+```
+
+构造时密码已做 bcrypt 哈希。name 为 None 或空字符串时，or 表达式选用账号。role 与 status 由服务端固定，防止客户端通过注册请求把自己设置为管理员。此时创建的是 Python ORM 对象，还没有完成持久化。
+
+#### 第三步：加入会话并提交数据库
+
+```python
+db.add(user_model)
+db.commit()
+```
+
+add 把对象纳入会话，commit 提交事务并持久化。若数据库错误导致失败，不应继续声称注册成功；通用异常处理器会返回失败，真实原因看后端日志。
+
+#### 第四步：读取插入后的最新字段
+
+```python
+db.refresh(user_model)
+```
+
+按数据库中的当前值刷新 ORM 对象，例如生成的 ID。当前函数并没有继续返回 user_model，所以这里是源码保留的刷新动作，不应说每次插入都必须 refresh 才能保存。
+
+**把结果连起来：** 查重通过 → 明文转哈希 → 构造学生用户 → add/commit 保存；刷新与保存是不同动作。
+
+
 四个知识点:
 
 | 知识点 | 说明 |
@@ -183,7 +378,7 @@ def register(db: Session, data: RegisterRequest):
 
 ---
 
-## 第三章 本课最有价值的部分:Service 层重构
+## 第三章 本课最有价值的部分：Service 层重构
 
 ### 3.1 为什么要把业务逻辑从 api 层抽出来
 
@@ -222,7 +417,10 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     return Response.success(message="登录成功", data=result)
 ```
 
-### 3.3 重构的回报:/token 端口的复用
+**这段代码怎样执行：** 这段是分层前后的结构对比，省略号是讲解占位，不能直接当成完整可运行代码。重构后 API 调用 auth_services.login，服务函数继续执行原有查账号、验密码、验状态、签发 token 的顺序。改变的是职责位置，接口路径不必因此变化。
+
+
+### 3.3 重构的回报：/token 端口的复用
 
 ```python
 @router.post("/token", include_in_schema=False)
@@ -231,6 +429,36 @@ def login_for_docs(form: OAuth2PasswordRequestForm = Depends(), db = Depends(get
     result = auth_services.login(db, data)                               # ② 复用同一个 service
     return {"access_token": result.token, "token_type": "bearer"}        # ③ OAuth2 格式包装
 ```
+
+**按执行顺序拆解：**
+
+#### 第一步：接收 OAuth2 表单
+
+```python
+form: OAuth2PasswordRequestForm = Depends()
+```
+
+Swagger 的 Authorize 使用表单字段，不是普通登录接口接收的 JSON。FastAPI 的表单依赖读取 username/password；表单和上传需要 python-multipart 依赖。
+
+#### 第二步：转换为统一的请求模型
+
+```python
+data = LoginRequest(username=form.username, password=form.password)
+```
+
+将表单中两个字段重新组装成 LoginRequest，使普通 JSON 登录与文档登录可以共用同一服务函数，而不用各写一套密码判断。
+
+#### 第三步：复用登录逻辑并按 OAuth2 返回
+
+```python
+result = auth_services.login(db, data)
+return {"access_token": result.token, "token_type": "bearer"}
+```
+
+result 是 LoginResponse 模型，包含 token 与用户；这里挑出 token 放在 OAuth2 要求的顶层 access_token。这个接口不是统一业务 Response 的嵌套格式。include_in_schema=False 隐藏该接口的文档条目，但不会取消路径。
+
+**把结果连起来：** 两个不同输入格式适配到同一业务流程，输出再按各自调用方约定包装。
+
 
 **同一种能力,两种接口包装,业务逻辑只有一份。** 以后改登录规则,只改 service 一处,两个入口同时生效。
 
@@ -245,13 +473,15 @@ def login_for_docs(form: OAuth2PasswordRequestForm = Depends(), db = Depends(get
 | `router is not defined` | 注册成功但不跳转 | 用了 router 没 import |
 | `RegisterRequest is not defined` | NameError | 新增 register 函数时忘了同步 import |
 | 注册 admin 没有"账户已存在"提示 | 请求根本没到后端 | **后端没启动!**(8000 没监听)—— 排查先查服务活没活 |
-| service 文件从 api 复制后一堆 HTTP import | 分层不干净 | service 层不该 import Request/Response/路由相关 |
+| service 文件从 api 复制后一堆 HTTP import | 分层不干净 | 本项目 service 保留业务和数据处理，不需要为路由收发导入 Request/Response 等 HTTP 对象 |
 
 **调试顺序口诀:服务活没活 → 请求发没发 → 后端返回啥 → 前端处理没。**
 
 ---
 
 ## 第五章 验证清单
+
+以下命令是测试步骤，密码是占位值；本次文档修订不代表重新执行了这些写数据库操作。
 
 ```bash
 # 1. 注册新用户

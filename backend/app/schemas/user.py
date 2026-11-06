@@ -8,6 +8,7 @@ class UserResponse(BaseModel):
     email:str | None=None
     phone:str | None=None
     avatar:str | None =None
+    status:int
 
     model_config=ConfigDict(from_attributes=True)
 

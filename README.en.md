@@ -2,9 +2,9 @@
 
 [中文](./README.md) | [English](./README.en.md)
 
-A course-driven project with a Vue frontend and a FastAPI backend. Development has reached **Lesson 12: User Password Updates**. The current implementation focuses on accounts and user profiles.
+A course-driven project with a Vue frontend and a FastAPI backend. Development has reached **Lesson 13: User List Display**. The current implementation covers accounts, profiles, and administrator user-list queries.
 
-Laboratory management, equipment management, user administration, and reservations are unfinished. AI/Agent functionality has not been integrated.
+Laboratory management, equipment management, reservations, and other user administration operations remain unfinished. AI/Agent functionality has not been integrated.
 
 ## Features and course progress
 
@@ -16,10 +16,11 @@ Laboratory management, equipment management, user administration, and reservatio
 | User profile | Read and update name, email, phone, and avatar; synchronize frontend user state |
 | File uploads | Local file storage with access through `/uploads` |
 | Password updates | Verify the current password, reject an identical new password, store a bcrypt hash; frontend clears local credentials and redirects to login on success |
-| Laboratories, equipment, user administration | Placeholder pages; equipment and user administration menu entries have no matching routes yet |
+| User list | `/manager/user` displays accounts, names, avatars, contact details, roles, and status; supports pagination and account/name keyword searches; backend queries require an administrator |
+| Laboratories and equipment | Placeholder pages; the equipment management menu entry has no matching route yet |
 | Reservations and AI/Agent | Not implemented |
 
-Existing notes cover Lessons 6–12: JWT, responses and exceptions, Axios integration, registration and service layers, uploads, profiles, and password updates.
+Existing notes cover Lessons 6–13: JWT, responses and exceptions, Axios integration, registration and service layers, uploads, profiles, password updates, and user lists. Lessons 6–12 now include detailed explanations following code execution order.
 
 ## Technology
 
@@ -151,6 +152,7 @@ Output is written to `frontend/dist/` and excluded from source control. A succes
 | GET | `/api/user/me` | Read the authenticated user's profile |
 | PUT | `/api/user/me` | Update the authenticated user's profile |
 | PUT | `/api/user/password` | Update the authenticated user's password |
+| GET | `/api/user/list` | Administrator user queries with `page`, `page_size`, and `keywords`; keywords match account or name |
 | POST | `/api/files/upload` | Upload a file; currently does not require authentication |
 
 Typical business response:
@@ -171,7 +173,7 @@ After each lesson, verify the feature, synchronize notes, update course progress
 git status --short
 git add .
 git diff --cached --stat
-git commit -m "Lesson 13: complete the lesson feature"
+git commit -m "Lesson 14: complete the lesson feature"
 git push origin main
 ```
 
@@ -183,5 +185,6 @@ Review staged changes for credentials or personal files before committing.
 - Examples contain placeholders. Keep actual credentials, signing secrets, passwords, and tokens out of documentation, screenshots, and commit messages.
 - `VITE_*` variables are public browser configuration, not secret storage.
 - This is a course development snapshot. Clearing local credentials does not revoke JWTs held elsewhere.
+- User administration currently provides listing and searching, without create/edit/delete/status controls. The frontend route guard checks token presence; the backend query endpoint enforces the administrator role.
 - The password endpoint returned success in a user-run curl check. The full old-password/new-password login verification still requires actual confirmation.
 - See [docs/PRE_UPLOAD_REVIEW.md](./docs/PRE_UPLOAD_REVIEW.md) for the preparation record in Chinese.
