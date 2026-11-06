@@ -2,9 +2,9 @@
 
 [中文](./README.md) | [English](./README.en.md)
 
-A course-driven project with a Vue frontend and a FastAPI backend. Development has reached **Lesson 13: User List Display**. The current implementation covers accounts, profiles, and administrator user-list queries.
+A course-driven project with a Vue frontend and a FastAPI backend. Development has reached **Lesson 14: User Creation, Editing, and Deletion**. The current implementation covers accounts, profiles, and administrator user-list and CRUD operations.
 
-Laboratory management, equipment management, reservations, and other user administration operations remain unfinished. AI/Agent functionality has not been integrated.
+The overall framework is still being developed alongside the course. Laboratory management, equipment management, and reservations remain unfinished. AI/Agent functionality has not been integrated. Further validation, asynchronous handling, and other improvements are recorded at the end of the lesson notes for review after the entire course is finished.
 
 ## Features and course progress
 
@@ -17,10 +17,11 @@ Laboratory management, equipment management, reservations, and other user admini
 | File uploads | Local file storage with access through `/uploads` |
 | Password updates | Verify the current password, reject an identical new password, store a bcrypt hash; frontend clears local credentials and redirects to login on success |
 | User list | `/manager/user` displays accounts, names, avatars, contact details, roles, and status; supports pagination and account/name keyword searches; backend queries require an administrator |
+| User CRUD | Administrators can create, edit, and confirm deletion; creation/editing share a dialog, the password field is hidden during editing, self-deletion is blocked by the backend, and the menu is visible to administrators |
 | Laboratories and equipment | Placeholder pages; the equipment management menu entry has no matching route yet |
 | Reservations and AI/Agent | Not implemented |
 
-Existing notes cover Lessons 6–13: JWT, responses and exceptions, Axios integration, registration and service layers, uploads, profiles, password updates, and user lists. Lessons 6–12 now include detailed explanations following code execution order.
+Existing notes cover Lessons 6–14: JWT, responses and exceptions, Axios integration, registration and service layers, uploads, profiles, password updates, user lists, and user creation/editing/deletion. Lessons 6–12 now include detailed explanations following code execution order.
 
 ## Technology
 
@@ -153,6 +154,9 @@ Output is written to `frontend/dist/` and excluded from source control. A succes
 | PUT | `/api/user/me` | Update the authenticated user's profile |
 | PUT | `/api/user/password` | Update the authenticated user's password |
 | GET | `/api/user/list` | Administrator user queries with `page`, `page_size`, and `keywords`; keywords match account or name |
+| POST | `/api/user` | Create a user as an administrator |
+| PUT | `/api/user/{user_id}` | Edit a specified user's profile as an administrator |
+| DELETE | `/api/user/{user_id}` | Delete a specified user as an administrator; self-deletion is blocked |
 | POST | `/api/files/upload` | Upload a file; currently does not require authentication |
 
 Typical business response:
@@ -173,7 +177,7 @@ After each lesson, verify the feature, synchronize notes, update course progress
 git status --short
 git add .
 git diff --cached --stat
-git commit -m "Lesson 14: complete the lesson feature"
+git commit -m "Lesson 15: complete the lesson feature"
 git push origin main
 ```
 
@@ -185,6 +189,7 @@ Review staged changes for credentials or personal files before committing.
 - Examples contain placeholders. Keep actual credentials, signing secrets, passwords, and tokens out of documentation, screenshots, and commit messages.
 - `VITE_*` variables are public browser configuration, not secret storage.
 - This is a course development snapshot. Clearing local credentials does not revoke JWTs held elsewhere.
-- User administration currently provides listing and searching, without create/edit/delete/status controls. The frontend route guard checks token presence; the backend query endpoint enforces the administrator role.
+- User administration supports the CRUD operations covered by this lesson, with role/status fields in the editing dialog. The frontend route guard checks token presence; the corresponding backend endpoints enforce administrator access. The overall system remains unfinished.
+- Deferred improvements are recorded at the end of [Lesson 14](./docs/notes/14-user-crud.md#附录课程结束后统一完善). The current course implementation is retained until the course is complete.
 - The password endpoint returned success in a user-run curl check. The full old-password/new-password login verification still requires actual confirmation.
 - See [docs/PRE_UPLOAD_REVIEW.md](./docs/PRE_UPLOAD_REVIEW.md) for the preparation record in Chinese.
