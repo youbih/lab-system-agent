@@ -180,6 +180,7 @@
 
 <script setup>
 import { nextTick, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Plus } from '@element-plus/icons-vue'
 import {
@@ -191,7 +192,14 @@ import {
 import { getLabPageList } from '@/api/lab'
 import { uploadFileApi } from '@/api/file'
 
+const route = useRoute()
+
 const params = reactive({ page: 1, pageSize: 10, keywords: '', labId: null })
+
+// 从"实验室列表页"跳转过来时,带上 lab_id 自动筛选该实验室的设备
+if (route.query.lab_id) {
+  params.labId = Number(route.query.lab_id)
+}
 const tableData = ref([])
 const total = ref(0)
 const loading = ref(false)

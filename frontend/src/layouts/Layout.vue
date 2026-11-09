@@ -50,7 +50,7 @@
               <el-icon><House /></el-icon>
               <span>实验室管理</span>
             </el-menu-item>
-            <el-menu-item index="/manager/equ">
+            <el-menu-item index="/manager/equipment" v-if="userInfo?.role === 'admin'">
               <el-icon><Setting /></el-icon>
               <span>设备列表管理</span>
             </el-menu-item>
