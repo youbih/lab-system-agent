@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 from app.api import api
+from app.models.equipment import Equipment
 from app.config import UPLOAD_DIR
 from app.common.exceptions import (
     BusinessException,

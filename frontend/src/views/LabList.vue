@@ -1,5 +1,5 @@
 <template>
-  <div>设备列表管理页面</div>
+  <div>实验室列表</div>
 </template>
 
 <script setup></script>

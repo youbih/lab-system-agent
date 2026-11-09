@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.dependencies.auth import get_current_admin
+from app.dependencies.auth import get_current_admin, get_current_user
 from app.models.user import User
 from app.models.lab import Lab
 from app.schemas.lab import (
@@ -20,10 +20,20 @@ def get_lab_list(
     page: int = 1,
     page_size: int = 10,
     keywords: str | None = None,
-    current_user: User = Depends(get_current_admin),
+    status:int |None=None,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    res = lab_services.get_lab_page_list(db, page, page_size, keywords)
+    res = lab_services.get_lab_page_list(db, page, page_size, keywords,status)
+    return Response.success(data=res)
+
+
+@router.get("/{lab_id}")
+def get_lab_list(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    res = lab_services.get_lab(db,id)
     return Response.success(data=res)
 
 
