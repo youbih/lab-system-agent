@@ -4,6 +4,7 @@ from pathlib import Path
 # 允许从任意目录启动:把 backend 目录加入模块搜索路径
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.models.user import User
+from app.models.lab import Lab
 from app.database import Base,engine
 from app.api.auth import router as auth_router
 from app.api.user import router as user_router
@@ -49,7 +50,7 @@ app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError,validation_exception_handler)
 app.add_exception_handler(Exception, global_exception_handler)
 
-#挂载静态的文件目录 http://127.0.0.1:8000/uploads/xxx.jpg
+# 挂载静态的文件目录 http://127.0.0.1:8000/uploads/xxx.jpg
 app.mount("/uploads",StaticFiles(directory=UPLOAD_DIR),name="uploads")
 
 app.include_router(api)

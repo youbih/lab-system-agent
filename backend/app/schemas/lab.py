@@ -1,0 +1,40 @@
+from pydantic import BaseModel, ConfigDict
+
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class LabResponse(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    img: str | None = None
+    location: str | None = None
+    capacity: int
+    open_time: str | None = None
+    close_time: str | None = None
+    status: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LabCreateRequest(BaseModel):
+    name: str
+    description: str | None = None
+    img: str | None = None
+    location: str | None = None
+    capacity: int = 0
+    open_time: str | None = None
+    close_time: str | None = None
+    status: int = 1
+
+
+class LabUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    img: str | None = None
+    location: str | None = None
+    capacity: int | None = None
+    open_time: str | None = None
+    close_time: str | None = None
+    status: int | None = None

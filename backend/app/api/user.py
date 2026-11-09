@@ -67,5 +67,5 @@ def delete_user(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    res = user_services.delete_user(db, user_id, current_user)
+    user_services.delete_user(db, user_id, current_user)
     return Response.success()
