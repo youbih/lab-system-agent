@@ -1,7 +1,21 @@
 <template>
+  <ReserveDialog
+    v-model:visible="reserveVisible"
+    :lab-id="selectedEquipment.lab_id"
+    :lab-name="selectedEquipment.lab_name"
+    :equipment-id="selectedEquipment.id"
+    :equipment-name="selectedEquipment.name"
+  />
   <div>
     <!-- 顶部:标题 + 搜索 -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
+    <div
+      style="
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      "
+    >
       <div style="display: flex; align-items: center; gap: 12px">
         <el-button @click="goBack">返回</el-button>
         <span style="font-size: 18px; font-weight: bold">{{ labName || '设备列表' }}</span>
@@ -101,6 +115,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Location, User, Clock } from '@element-plus/icons-vue'
 import { getEquipmentPageList } from '@/api/equipment'
+import ReserveDialog from '@/components/ReserveDialog.vue'
 import defaultImg from '@/assets/imgs/logo.png'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL
@@ -111,6 +126,8 @@ const router = useRouter()
 const labId = Number(route.query.lab_id) || null
 const labName = route.query.lab_name || ''
 
+const reserveVisible = ref(false)
+const selectedEquipment = ref({})
 const keywords = ref('')
 const tableData = ref([])
 const loading = ref(false)
@@ -148,7 +165,8 @@ const goBack = () => {
 
 // 预约占位:后续课程实现真正的预约功能
 const goReserve = (equipment) => {
-  ElMessage.info(`「${equipment.name}」预约功能开发中,敬请期待`)
+  selectedEquipment.value = equipment
+  reserveVisible.value = true
 }
 
 // 搜索框被清空时(点 × 或手动删完),自动恢复完整列表

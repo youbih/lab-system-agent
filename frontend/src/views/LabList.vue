@@ -1,6 +1,12 @@
 <template>
+  <ReserveDialog
+    v-model:visible="reserveVisible"
+    :lab-id="selectedLab.id"
+    :lab-name="selectedLab.name"
+  />
   <div>
     <!-- 顶部:搜索区 -->
+
     <div style="display: flex; gap: 10px; margin-bottom: 20px">
       <el-input
         v-model="keywords"
@@ -101,10 +107,11 @@ import { ElMessage } from 'element-plus'
 import { useRouter, useRoute } from 'vue-router'
 import { getLabPageList } from '@/api/lab'
 import defaultCover from '@/assets/imgs/logo.png'
-
+import ReserveDialog from '@/components/ReserveDialog.vue'
 const router = useRouter()
 const route = useRoute()
-
+const reserveVisible = ref(false)
+const selectedLab = ref({})
 const goEquipment = (lab) => {
   router.push({
     path: '/manager/labequipment',
@@ -120,7 +127,8 @@ const goEquipment = (lab) => {
 }
 
 const goReserve = (lab) => {
-  ElMessage.info(`「${lab.name}」预约功能开发中,敬请期待`)
+  selectedLab.value = lab
+  reserveVisible.value = true
 }
 
 const baseURL = import.meta.env.VITE_API_BASE_URL
@@ -128,7 +136,7 @@ const baseURL = import.meta.env.VITE_API_BASE_URL
 const keywords = ref('')
 const labList = ref([])
 const loading = ref(false)
-const page = ref(Number(route.query.page) || 1)   // 从 URL 恢复页码(返回时保持)
+const page = ref(Number(route.query.page) || 1) // 从 URL 恢复页码(返回时保持)
 const pageSize = ref(8)
 const total = ref(0)
 

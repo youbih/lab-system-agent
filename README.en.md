@@ -2,9 +2,9 @@
 
 [中文](./README.md) | [English](./README.en.md)
 
-A course-driven project with a Vue frontend and a FastAPI backend. Development has reached **Lesson 15: Laboratory Management**. The current implementation covers accounts, profiles, administrator user CRUD, and laboratory management with cover uploads and opening hours.
+A course-driven project with a Vue frontend and a FastAPI backend. Development has reached **Lesson 18: Laboratory Reservations**. The implementation covers accounts, profiles, administrator user/laboratory/equipment management, student browsing, and submission of reservations for approval.
 
-The overall framework is still being developed alongside the course. Equipment management and reservations remain unfinished. AI/Agent functionality has not been integrated. Further validation, database constraints, and other improvements are recorded at the end of the lesson notes for review after the entire course is finished.
+The overall framework is still being developed alongside the course. Lesson 19 will add My Reservations and Reservation Review. AI/Agent functionality has not been integrated. Further validation, database constraints, and other improvements are recorded at the end of the lesson notes for review after the entire course is finished.
 
 ## Features and course progress
 
@@ -19,10 +19,13 @@ The overall framework is still being developed alongside the course. Equipment m
 | User list | `/manager/user` displays accounts, names, avatars, contact details, roles, and status; supports pagination and account/name keyword searches; backend queries require an administrator |
 | User CRUD | Administrators can create, edit, and confirm deletion; creation/editing share a dialog, the password field is hidden during editing, self-deletion is blocked by the backend, and the menu is visible to administrators |
 | Laboratory management | Administrator pagination, search, creation, editing, and deletion; name checks, cover uploads, capacity and opening hours; management menu hidden for students |
-| Equipment management | Route and placeholder page exist; business functionality remains unfinished |
-| Reservations and AI/Agent | Not implemented |
+| Equipment management | Administrator CRUD, name and laboratory filters, images, laboratory names in responses, and duplicate-name checks within each laboratory |
+| Student browsing | Laboratory cards, equipment lists, search, pagination, and navigation parameters |
+| Reservation submission | Shared dialog for laboratories and equipment; same-day appointments, half-hour increments, at least 30 minutes, starting 1 hour to 7 days ahead; opening-hours, equipment, and overlap checks; new records await approval |
+| My Reservations and Reservation Review | Planned for Lesson 19; successful submission does not mean approval |
+| AI/Agent | Not implemented |
 
-Existing notes cover Lessons 6–15: JWT, responses and exceptions, Axios integration, registration and service layers, uploads, profiles, password updates, user lists, user CRUD, and laboratory management. Notes explain code in execution order and distinguish verified results from deferred improvements.
+Existing notes cover Lessons 6–18. [Lesson 18: Laboratory Reservations](./docs/notes/18-lab-reservation.md) explains model/schema/service code, request wrappers, reusable components, parent-child communication, validation, submission, and reset behavior. It also records migration steps and verification of the final rules. Lesson notes are in Chinese.
 
 ## Technology
 
@@ -62,6 +65,7 @@ lab-system-agent/
     ├── vite.config.js
     └── src/
         ├── api/              # HTTP request wrappers
+        ├── components/       # Shared ReserveDialog component
         ├── utils/            # Axios, local credentials, and user state
         ├── views/            # Login, registration, profile, password, etc.
         ├── layouts/          # Shared layout and navigation
@@ -103,6 +107,8 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 On startup, `Base.metadata.create_all()` creates missing tables. It does not migrate existing tables or create the MySQL database itself. There is no seeded administrator account; registration creates a student account.
+
+Existing reservation tables using `date/start_time/end_time` must be migrated to non-null `DATETIME` columns `start_at/end_at`: back up, convert and verify, remove the old columns, then restart the backend. A fresh database uses the new model directly. See the [Lesson 18 migration guide](./docs/notes/18-lab-reservation.md#第十四章-数据库迁移与运行版本). Database contents and local backups are not pushed to GitHub.
 
 ### 3. Start the backend
 
@@ -158,10 +164,15 @@ Output is written to `frontend/dist/` and excluded from source control. A succes
 | POST | `/api/user` | Create a user as an administrator |
 | PUT | `/api/user/{user_id}` | Edit a specified user's profile as an administrator |
 | DELETE | `/api/user/{user_id}` | Delete a specified user as an administrator; self-deletion is blocked |
-| GET | `/api/lab/list` | Administrator pagination and laboratory-name keyword search |
+| GET | `/api/lab/list` | Authenticated laboratory pagination and name keyword search |
 | POST | `/api/lab` | Create a laboratory as an administrator; duplicate names are rejected |
 | PUT | `/api/lab/{lab_id}` | Edit a laboratory as an administrator; name checks exclude the current record |
 | DELETE | `/api/lab/{lab_id}` | Delete a laboratory as an administrator |
+| GET | `/api/equipment/list` | Authenticated equipment queries with name keywords and a `lab_id` filter |
+| POST | `/api/equipment` | Create equipment as an administrator |
+| PUT | `/api/equipment/{equipment_id}` | Edit equipment as an administrator |
+| DELETE | `/api/equipment/{equipment_id}` | Delete equipment as an administrator |
+| POST | `/api/reservation` | Submit a pending reservation with `lab_id`, optional `equipment_id`, `start_at`, `end_at`, and optional `remark` |
 | POST | `/api/files/upload` | Upload a file; currently does not require authentication |
 
 Typical business response:
@@ -176,13 +187,13 @@ Business exceptions can return HTTP 200 with a non-200 business `code`. Inspect 
 
 Course notes have been copied into [docs/notes](./docs/notes/) to be committed with the code. The original learning directory at `agent-lab/docs/lab-system-agent-notes/` is preserved. After editing notes there, synchronize the relevant files into `docs/notes/` before committing. Lessons 6–11 retain historical endpoint and file names; use the current source and this README for the latest implementation.
 
-After each lesson, verify the feature, synchronize notes, update course progress, and commit the changes. GitHub repository: <https://github.com/youbih/lab-system-agent>.
+After each lesson, verify the feature, synchronize notes, update course progress, and commit the changes. Next: Lesson 19, My Reservations and Reservation Review. GitHub repository: <https://github.com/youbih/lab-system-agent>.
 
 ```bash
 git status --short
 git add .
 git diff --cached --stat
-git commit -m "Lesson 16: complete the lesson feature"
+git commit -m "Lesson 19: complete the lesson feature"
 git push origin main
 ```
 
@@ -195,7 +206,8 @@ Review staged changes for credentials or personal files before committing.
 - `VITE_*` variables are public browser configuration, not secret storage.
 - This is a course development snapshot. Clearing local credentials does not revoke JWTs held elsewhere.
 - User administration supports the CRUD operations covered by this lesson, with role/status fields in the editing dialog. The frontend route guard checks token presence; the corresponding backend endpoints enforce administrator access. The overall system remains unfinished.
-- Laboratory opening hours use same-day `HH:mm` strings, and covers reuse the file upload endpoint. The frontend sends a complete payload; model nullability and optional request-field consistency remain deferred improvements.
-- Deferred improvements are recorded at the end of [Lesson 14](./docs/notes/14-user-crud.md#附录课程结束后统一完善) and [Lesson 15](./docs/notes/15-lab-management.md#附录课程结束后统一完善). The current course implementation is retained; personal profile field exclusion has been implemented in this lesson.
+- Reservation timestamps are stored as Beijing local time; creation is restricted to one date and half-hour increments. The opening-hours helper retains overnight and 24-hour interpretations; alignment with the management form remains deferred.
+- Laboratory and equipment bookings are checked separately. Concurrent booking protection, quantity allocation, and advance disabling of unavailable slots remain deferred. The final source passed 35 curl checks and 2 database checks through a temporary service, and the frontend build passed; browser end-to-end interaction has not been verified.
+- Deferred improvements are recorded at the end of [Lesson 14](./docs/notes/14-user-crud.md#附录课程结束后统一完善), [Lesson 15](./docs/notes/15-lab-management.md#附录课程结束后统一完善), and [Lesson 18](./docs/notes/18-lab-reservation.md#附录课程结束后统一完善). The current course implementation is retained; personal profile field exclusion was implemented earlier.
 - The password endpoint returned success in a user-run curl check. The full old-password/new-password login verification still requires actual confirmation.
 - See [docs/PRE_UPLOAD_REVIEW.md](./docs/PRE_UPLOAD_REVIEW.md) for the preparation record in Chinese.

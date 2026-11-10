@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from app.models.reservation import Reservation
 from starlette.middleware.cors import CORSMiddleware
 from app.api import api
 from app.models.equipment import Equipment
