@@ -1,14 +1,14 @@
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
-
+from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import Session
-
+from app.common.response import PageResponse
 from app.common.exceptions import BusinessException
 from app.models.equipment import Equipment
 from app.models.lab import Lab
 from app.models.reservation import Reservation
 from app.models.user import User
-from app.schemas.reservation import ReservationCreateRequest
+from app.schemas.reservation import ReservationCreateRequest, ReservationResponse
 
 """
 预约顺序解析：
@@ -89,6 +89,12 @@ def create_reservation(
     # 1. schema 已经完成解析，这里统一时区
     start_at = to_beijing_time(data.start_at)
     end_at = to_beijing_time(data.end_at)
+    if data.reservation_type not in (0, 1, 2):
+        raise BusinessException(message="无效的预约类型")
+    if data.reservation_type == 0 and data.equipment_id is not None:
+        raise BusinessException(message="仅预约实验室时不能选择设备")
+    if data.reservation_type in (1, 2) and data.equipment_id is None:
+        raise BusinessException(message="该预约类型必须选择设备")
 
     # 日期以转换后的北京时间为准
     if start_at.date() != end_at.date():
@@ -125,8 +131,8 @@ def create_reservation(
 
     check_opening_hours(lab, start_at, end_at)
 
-    # 5. 选了设备时，检查设备存在、归属和状态
-    if data.equipment_id is not None:
+    # 5. 仅设备/实验室+设备时，校验设备存在、归属和状态
+    if data.reservation_type in (1,2):
         equipment = (
             db.query(Equipment).filter(Equipment.id == data.equipment_id).first()
         )
@@ -140,21 +146,37 @@ def create_reservation(
         if equipment.status != 1:
             raise BusinessException(message="实验室设备正在维修")
 
-    # 6. 使用完整日期时间判断预约冲突
-    query = db.query(Reservation).filter(
-        Reservation.lab_id == data.lab_id,
-        Reservation.status.in_([0, 1]),
-        Reservation.start_at < end_at,
-        Reservation.end_at > start_at,
-    )
+    # 占用实验室的类型：0、2
+    if data.reservation_type in (0, 2):
+        exists = (
+            db.query(Reservation)
+            .filter(
+                Reservation.lab_id == data.lab_id,
+                Reservation.reservation_type.in_([0, 2]),  # 只有占实验室的记录才冲突
+                Reservation.status.in_([0, 1]),  # 待审核+已通过才算占用
+                Reservation.start_at < end_at,  # 时间重叠的标准写法
+                Reservation.end_at > start_at,
+            )
+            .first()
+        )
+        if exists:
+            raise BusinessException(message="该时段实验室已被预约")
 
-    if data.equipment_id is not None:
-        query = query.filter(Reservation.equipment_id == data.equipment_id)
-    else:
-        query = query.filter(Reservation.equipment_id.is_(None))
-
-    if query.first():
-        raise BusinessException(message="该时段已预约")
+    # 占用设备的类型：1、2
+    if data.reservation_type in (1, 2):
+        exists = (
+            db.query(Reservation)
+            .filter(
+                Reservation.equipment_id == data.equipment_id,
+                Reservation.reservation_type.in_([1, 2]),  # 只有占设备的记录才冲突
+                Reservation.status.in_([0, 1]),
+                Reservation.start_at < end_at,
+                Reservation.end_at > start_at,
+            )
+            .first()
+        )
+        if exists:
+            raise BusinessException(message="该设备在该时段已被预约")
 
     # 7. 保存预约
     reservation = Reservation(
@@ -165,8 +187,80 @@ def create_reservation(
         end_at=end_at,
         remark=data.remark,
         status=0,
+        reservation_type=data.reservation_type
     )
 
     db.add(reservation)
     db.commit()
     db.refresh(reservation)
+
+
+def get_reservation_page_list(db:Session,current_user:User,page:int,page_size:int,status:int | None=None):
+    """查询预约的记录"""
+    query=db.query(Reservation)
+    if current_user.role!="admin":
+        query=query.filter(Reservation.user_id==current_user.id)
+    if status is not None:
+        query=query.filter(Reservation.status==status)
+    total=query.count()
+    items = (
+        query.options(
+            joinedload(Reservation.user),
+            joinedload(Reservation.lab),
+            joinedload(Reservation.equipment),
+        )
+        .order_by(Reservation.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    result=[]
+    for item in items:
+        res=ReservationResponse.model_validate(item)
+        res.user_name =item.user.name if item.user else None
+        res.lab_name=item.lab.name if item.lab else None
+        res.equipment_name=item.equipment.name if item.equipment else None
+        result.append(res)
+
+    return PageResponse(list=result,total=total)
+
+
+def cancel_reservation(db:Session,current_user:User,reservation_id:int):
+    """学生取消自己的待审核预约"""
+    item = (
+        db.query(Reservation)
+        .filter(
+            Reservation.id == reservation_id,  # 找到"我说要取消的那条预约"
+            Reservation.user_id == current_user.id,  # 并且这条预约必须是我订的
+        )
+        .first()
+    )
+    if not item:
+        raise BusinessException(message="预约记录不存在或无权操作")
+
+    if item.status == 3:
+        raise BusinessException(message="该预约已取消，请勿重复操作")
+
+    if item.status != 0:
+        raise BusinessException(message="只有待审核的预约可以取消")
+
+    item.status = 3
+    db.commit()
+
+
+def audit_reservation(
+    db: Session, current_user: User, reservation_id: int, status: int
+):
+    item = db.query(Reservation).filter(Reservation.id == reservation_id).first()
+
+    if not item:
+        raise BusinessException(message="预约记录不存在")
+
+    if status not in (1, 2):
+        raise BusinessException(message="无效的审核结果")
+
+    if item.status != 0:
+        raise BusinessException(message="只有待审核的预约可以审核")
+
+    item.status = status
+    db.commit()

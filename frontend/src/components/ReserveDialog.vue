@@ -23,9 +23,27 @@
           <span>{{ props.labName }}</span>
         </el-form-item>
 
-        <el-form-item v-if="props.equipmentId" label="设备">
-          <span>{{ props.equipmentName }}</span>
+        <el-form-item label="设备" prop="equipmentId">
+          <el-select
+            v-model="form.equipmentId"
+            placeholder="不预约设备（仅使用实验室）"
+            clearable
+            :loading="equipmentLoading"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in equipmentOptions"
+              :key="item.id"
+              :label="item.status === 1 ? item.name : `${item.name}（维修中）`"
+              :value="item.id"
+              :disabled="item.status !== 1"
+            />
+          </el-select>
+          <div style="color: #909399; font-size: 12px; line-height: 1.5; margin-top: 4px">
+            不选设备表示仅预约实验室；选择设备会同时占用实验室和该设备
+          </div>
         </el-form-item>
+
         <el-form-item label="预约日期" prop="date">
           <el-date-picker
             v-model="form.date"
@@ -83,9 +101,10 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { createReservationApi } from '@/api/reservation'
+import { getEquipmentPageList } from '@/api/equipment'
 const props = defineProps({
   visible: Boolean,
   labId: Number,
@@ -97,11 +116,52 @@ const props = defineProps({
 const emit = defineEmits(['update:visible'])
 const formRef = ref()
 const form = reactive({
+  equipmentId: null,
   date: '',
   startTime: '',
   endTime: '',
   remark: ''
 })
+
+const equipmentOptions = ref([])
+const equipmentLoading = ref(false)
+
+const loadEquipmentOptions = async () => {
+  if (!props.labId) return
+  equipmentLoading.value = true
+  try {
+    const res = await getEquipmentPageList({
+      lab_id: props.labId,
+      page: 1,
+      page_size: 100
+    })
+    if (res.code === 200) {
+      const list = res.data.list
+      if (props.equipmentId && !list.some((item) => item.id === props.equipmentId)) {
+        list.unshift({
+          id: props.equipmentId,
+          name: props.equipmentName || '已选设备',
+          status: 1
+        })
+      }
+      equipmentOptions.value = list
+    }
+  } catch (error) {
+    console.error('加载设备列表失败', error)
+  } finally {
+    equipmentLoading.value = false
+  }
+}
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (visible) {
+      form.equipmentId = props.equipmentId ?? null
+      loadEquipmentOptions()
+    }
+  }
+)
 
 // 只允许整点或半点，例如 09:00、09:30
 const timePattern = /^([01]\d|2[0-3]):(00|30)$/
@@ -241,7 +301,8 @@ const handleSubmit = async () => {
   try {
     const res = await createReservationApi({
       lab_id: props.labId,
-      equipment_id: props.equipmentId ?? null,
+      equipment_id: form.equipmentId || null,
+      reservation_type: form.equipmentId ? 2 : 0,
       start_at: `${form.date}T${form.startTime}:00`,
       end_at: `${form.date}T${form.endTime}:00`,
       remark: form.remark

@@ -46,6 +46,10 @@
               <el-icon><OfficeBuilding /></el-icon>
               <span>实验室列表</span>
             </el-menu-item>
+            <el-menu-item index="/manager/myreservation" v-if="userInfo?.role === 'student'">
+              <el-icon><Calendar /></el-icon>
+              <span>我的预约</span>
+            </el-menu-item>
             <el-menu-item index="/manager/lab" v-if="userInfo?.role === 'admin'">
               <el-icon><House /></el-icon>
               <span>实验室管理</span>
@@ -57,6 +61,10 @@
             <el-menu-item index="/manager/user" v-if="userInfo?.role === 'admin'">
               <el-icon><User /></el-icon>
               <span>用户管理</span>
+            </el-menu-item>
+            <el-menu-item index="/manager/reservationaudit" v-if="userInfo?.role === 'admin'">
+              <el-icon><Checked /></el-icon>
+              <span>预约审核</span>
             </el-menu-item>
           </el-menu>
         </el-aside>
