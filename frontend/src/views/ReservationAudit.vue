@@ -131,7 +131,8 @@ const statusOptions = [
   { value: 0, label: '待审核' },
   { value: 1, label: '已通过' },
   { value: 2, label: '已拒绝' },
-  { value: 3, label: '已取消' }
+  { value: 3, label: '已取消' },
+  { value: 4, label: '已过期' }
 ]
 
 const tableData = ref([])

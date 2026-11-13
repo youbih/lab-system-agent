@@ -64,7 +64,16 @@
 
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusType(row.status)">
+            <el-tooltip
+              v-if="row.status === 4"
+              content="预约未在结束前完成审核，系统已自动关闭"
+              placement="top"
+            >
+              <el-tag :type="statusType(row.status)">
+                {{ statusText(row.status) }}
+              </el-tag>
+            </el-tooltip>
+            <el-tag v-else :type="statusType(row.status)">
               {{ statusText(row.status) }}
             </el-tag>
           </template>
@@ -116,7 +125,8 @@ const statusOptions = [
   { value: 0, label: '待审核' },
   { value: 1, label: '已通过' },
   { value: 2, label: '已拒绝' },
-  { value: 3, label: '已取消' }
+  { value: 3, label: '已取消' },
+  { value: 4, label: '已过期' }
 ]
 
 const tableData = ref([])

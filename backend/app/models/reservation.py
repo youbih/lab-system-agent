@@ -24,7 +24,7 @@ class Reservation(Base):
     reservation_type: Mapped[int] = mapped_column(
         comment="预约类型 0仅实验室 1仅设备 2实验室+设备", default=0
     )
-    status: Mapped[int] = mapped_column(comment="预约状态 0待审核 1已通过 2已拒绝 3已取消", default=0)
+    status: Mapped[int] = mapped_column(comment="预约状态 0待审核 1已通过 2已拒绝 3已取消 4已过期", default=0)
 
     start_at:Mapped[datetime]=mapped_column(DateTime,comment="预约开始日期时间",nullable=False)
     end_at:Mapped[datetime]=mapped_column(DateTime,comment="预约结束日期时间",nullable=False)

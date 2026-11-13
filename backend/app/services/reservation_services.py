@@ -195,8 +195,9 @@ def create_reservation(
     db.refresh(reservation)
 
 
-def get_reservation_page_list(db:Session,current_user:User,page:int,page_size:int,status:int | None=None):
+def get_reservation_page_list(db:Session,current_user:User,page:int,page_size:int,status=None):
     """查询预约的记录"""
+    expire_pending_reservations(db)
     query=db.query(Reservation)
     if current_user.role!="admin":
         query=query.filter(Reservation.user_id==current_user.id)
@@ -225,6 +226,22 @@ def get_reservation_page_list(db:Session,current_user:User,page:int,page_size:in
     return PageResponse(list=result,total=total)
 
 
+def expire_pending_reservations(db:Session):
+    """把已结束但还没审核的预约标记为已过期。"""
+    now = datetime.now(TIMEZONE).replace(tzinfo=None)
+    (
+        db.query(Reservation)
+        .filter(
+            Reservation.status == 0,
+            Reservation.end_at <= now,
+        )
+        .update(
+            {Reservation.status: 4, Reservation.update_time: now},
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+
 def cancel_reservation(db:Session,current_user:User,reservation_id:int):
     """学生取消自己的待审核预约"""
     item = (
@@ -240,6 +257,12 @@ def cancel_reservation(db:Session,current_user:User,reservation_id:int):
 
     if item.status == 3:
         raise BusinessException(message="该预约已取消，请勿重复操作")
+        
+    now = datetime.now(TIMEZONE).replace(tzinfo=None)
+    if item.status == 0 and item.end_at <= now:
+        item.status = 4
+        db.commit()
+        raise BusinessException(message="预约已过期，无法取消")
 
     if item.status != 0:
         raise BusinessException(message="只有待审核的预约可以取消")
@@ -258,6 +281,12 @@ def audit_reservation(
 
     if status not in (1, 2):
         raise BusinessException(message="无效的审核结果")
+
+    now = datetime.now(TIMEZONE).replace(tzinfo=None)
+    if item.status == 0 and item.end_at <= now:
+        item.status = 4
+        db.commit()
+        raise BusinessException(message="预约已过期，无法审核")
 
     if item.status != 0:
         raise BusinessException(message="只有待审核的预约可以审核")

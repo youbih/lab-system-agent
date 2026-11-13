@@ -1,9 +1,17 @@
 export const statusType = (status) => {
-  return { 0: 'warning', 1: 'success', 2: 'danger', 3: 'info' }[status] || 'info'
+  return { 0: 'warning', 1: 'success', 2: 'danger', 3: 'info', 4: 'info' }[status] || 'info'
 }
 
 export const statusText = (status) => {
-  return { 0: '待审核', 1: '已通过', 2: '已拒绝', 3: '已取消' }[status] || '未知'
+  return (
+    {
+      0: '待审核',
+      1: '已通过',
+      2: '已拒绝',
+      3: '已取消',
+      4: '已过期'
+    }[status] || '未知'
+  )
 }
 
 export const typeText = (type) => {
