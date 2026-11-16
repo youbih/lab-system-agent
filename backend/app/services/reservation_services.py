@@ -257,7 +257,7 @@ def cancel_reservation(db:Session,current_user:User,reservation_id:int):
 
     if item.status == 3:
         raise BusinessException(message="该预约已取消，请勿重复操作")
-        
+    
     now = datetime.now(TIMEZONE).replace(tzinfo=None)
     if item.status == 0 and item.end_at <= now:
         item.status = 4
