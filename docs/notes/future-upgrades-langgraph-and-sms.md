@@ -1035,6 +1035,416 @@ REMINDER_MINUTES=20
 
 ---
 
+## 第十一章 上下文管理与对话体验升级
+
+> 当前实现：前端每次把完整对话历史发给后端，后端不保存会话。  
+> 这是课程阶段的简化方案，长期需要专门的上下文管理模块。
+
+### 11.0 为什么需要
+
+当前做法的优点：
+
+- 后端无状态，不需要建会话表
+- 服务重启不丢历史（历史在前端内存）
+- 实现简单，便于联调
+
+长期问题：
+
+- 请求体随轮次增长，token 成本持续上升
+- 刷新页面或换设备后历史丢失
+- 历史完全由客户端控制，后端无法审计和限流
+- 没有摘要、没有窗口控制，长对话容易超出上下文
+- 无法支持历史会话列表和多会话切换
+
+目标：把“上下文”从浏览器内存迁移到后端，由后端负责组装、裁剪、摘要和权限控制。
+
+推荐实施顺序：
+
+```text
+会话持久化
+    → 上下文窗口 / 摘要
+    → SSE 流式输出
+    → 历史列表 / 多会话
+    → Markdown / 代码高亮
+    → 语音输入
+```
+
+---
+
+### 11.1 阶段一：会话持久化
+
+#### 数据表
+
+```text
+ai_conversations
+- id
+- user_id
+- title
+- last_message_at
+- status          active / archived / deleted
+- create_time
+- update_time
+
+ai_messages
+- id
+- conversation_id
+- role            user / assistant / system
+- content
+- token_count
+- client_msg_id   可选，前端消息 ID，用于幂等
+- create_time
+```
+
+索引建议：
+
+- `ai_conversations(user_id, last_message_at)`
+- `ai_messages(conversation_id, id)`
+- `ai_messages(conversation_id, client_msg_id)` 可选唯一索引
+
+#### 接口设计
+
+| 接口 | 作用 |
+|---|---|
+| `POST /api/ai/conversations` | 创建会话，返回 `conversation_id` |
+| `GET /api/ai/conversations` | 当前用户会话列表，分页 |
+| `GET /api/ai/conversations/{id}/messages` | 历史消息，分页/游标 |
+| `POST /api/ai/conversations/{id}/messages` | 发送消息并获取回答 |
+| `DELETE /api/ai/conversations/{id}` | 删除/归档会话 |
+
+#### 后端流程
+
+```text
+校验会话属于当前用户
+    ↓
+写入用户消息
+    ↓
+按策略加载上下文（窗口/摘要）
+    ↓
+调用大模型
+    ↓
+写入助手消息
+    ↓
+更新会话 last_message_at
+    ↓
+返回回答
+```
+
+注意：
+
+- 会话归属必须在 service 层校验，不能只靠前端传 user_id
+- 写入用户消息和助手消息要考虑失败情况：模型失败时消息是否保留
+- 支持 `client_msg_id` 幂等，防止重复发送
+- 删除建议软删除，保留审计
+
+#### 前端变化
+
+现在发送：
+
+```json
+{ "messages": [全量历史] }
+```
+
+之后发送：
+
+```json
+{ "conversation_id": 12, "content": "那设备呢？" }
+```
+
+刷新页面时用 `conversation_id` 拉取历史；新建对话时先创建会话。
+
+#### 验收标准
+
+- 刷新页面后历史仍在
+- 换设备登录能看到自己的会话
+- 学生无法读取别人的会话
+- 重复发送同一 `client_msg_id` 不会产生两条记录
+
+---
+
+### 11.2 阶段二：上下文窗口与摘要
+
+即使持久化了历史，也不能把所有消息都发给模型。
+
+#### 上下文预算
+
+```text
+总预算 = 模型上下文上限 - 预留输出 token - 安全余量
+```
+
+例如上下文 128K，预留输出 4K，安全余量 2K，则输入最多约 122K。
+
+#### 策略组合
+
+| 策略 | 说明 | 适用 |
+|---|---|---|
+| 系统提示词固定保留 | 永远第一条 | 全部 |
+| 最近 N 条优先 | 取最近消息 | 短对话 |
+| Token 预算截断 | 按 token 从旧到新丢弃 | 通用 |
+| 早期消息摘要 | 把旧对话压缩成摘要 | 长对话 |
+| 关键信息提取 | 保留预约草稿、确认状态等结构化信息 | 业务场景 |
+| 检索相关历史 | 按关键词/向量找相关片段 | 超长历史 |
+
+#### 摘要设计
+
+- 达到阈值（例如历史超过 20 条或 8K token）时生成摘要
+- 摘要要保留：用户目标、已确认参数、未完成操作、拒绝/取消原因
+- 摘要存到 `ai_conversations.summary` 或单独表
+- 摘要生成也要消耗 token，需限频
+- 摘要可能失真，重要状态要以数据库为准
+
+#### 裁剪注意
+
+- 不要留下孤立的 `assistant` 消息开头，尽量从 `user` 开始
+- 工具调用结果只保留必要字段
+- 裁剪后要重新计算 token
+- 不同模型的 token 计算方式不同，需要按模型适配
+
+#### 配置建议
+
+```env
+AI_MAX_CONTEXT_TOKENS=120000
+AI_RECENT_MESSAGES=20
+AI_SUMMARY_THRESHOLD_TOKENS=8000
+AI_MAX_OUTPUT_TOKENS=2000
+```
+
+#### 验收标准
+
+- 长对话不会超上下文报错
+- 摘要后仍能正确回答“我前面说了什么”
+- 成本增长可控
+
+---
+
+### 11.3 阶段三：SSE 流式输出
+
+现在是一次性返回整段文本，用户等待时间长。流式可以让回答逐字出现。
+
+#### 后端
+
+- 新增 `POST /api/ai/chat/stream` 或 `GET /api/ai/chat/stream`
+- 使用 `StreamingResponse`，`media_type="text/event-stream"`
+- 调用模型时开启 `stream=True`
+- 逐块解析 `delta.content`，按 SSE 格式发送
+- 设置 `Cache-Control: no-cache`、`X-Accel-Buffering: no`
+- 处理客户端断开：及时取消上游请求，避免继续计费
+- 发送心跳，防止代理超时
+
+事件格式示例：
+
+```text
+event: start
+data: {"conversation_id": 12}
+
+event: delta
+data: {"content": "预约"}
+
+event: delta
+data: {"content": "需要"}
+
+event: done
+data: {"usage": {"prompt_tokens": 305, "completion_tokens": 178}}
+
+event: error
+data: {"message": "调用失败"}
+```
+
+#### 前端
+
+`EventSource` 只支持 GET 且不能带自定义 Header，所以更常用：
+
+- `fetch` + `ReadableStream` 读取响应体
+- 手动解析 `data:` 行
+- 用 `AbortController` 支持“停止生成”
+- 失败时降级为非流式接口
+
+#### 部署注意
+
+- Nginx 关闭代理缓冲：`proxy_buffering off;`
+- 调大读超时
+- 网关/CDN 是否支持流式
+- 记录首字延迟和总耗时
+
+#### 验收标准
+
+- 回答逐字出现
+- 用户可中断
+- 断开后上游请求停止
+- 错误能显示并可重试
+
+---
+
+### 11.4 阶段四：历史会话列表与多会话
+
+#### 接口
+
+- `GET /api/ai/conversations?page=&page_size=`
+- `PATCH /api/ai/conversations/{id}` 重命名/归档
+- `DELETE /api/ai/conversations/{id}` 删除
+
+#### 会话标题
+
+- 创建时默认“新对话”
+- 首条用户消息后自动生成标题（可用小模型或规则截取）
+- 允许用户重命名
+
+#### 前端布局
+
+```text
+┌──────────────┬────────────────────────────┐
+│ 会话列表      │ 当前会话消息区              │
+│ [+ 新建对话]  │                            │
+│ 今天          │                            │
+│  实验室预约…   │                            │
+│  设备使用…     │                            │
+│ 昨天          │                            │
+│  ...          │                            │
+└──────────────┴────────────────────────────┘
+```
+
+要点：
+
+- 切换会话时加载对应历史
+- 删除后刷新列表
+- 会话列表分页或无限滚动
+- 移动端折叠侧边栏
+
+#### 验收标准
+
+- 可新建、切换、重命名、删除
+- 每个会话历史独立
+- 越权访问返回 404/403
+
+---
+
+### 11.5 阶段五：Markdown 与代码高亮
+
+模型输出经常包含列表、表格、代码块。
+
+#### 方案
+
+- `markdown-it` 解析 Markdown
+- `DOMPurify` 清洗 HTML
+- `highlight.js` 或 `shiki` 做代码高亮
+
+#### 安全
+
+- **绝不能直接 `v-html` 渲染原始模型输出**
+- 先清洗再渲染
+- 链接加 `rel="noopener noreferrer"`，必要时限制外链
+- 图片加载考虑防盗链和隐私
+- 代码块提供复制按钮
+
+#### 验收标准
+
+- Markdown 正常显示
+- 恶意脚本被清洗
+- 代码块可高亮、复制
+
+---
+
+### 11.6 阶段六：语音输入
+
+#### 两种路线
+
+| 路线 | 说明 | 优点 | 缺点 |
+|---|---|---|---|
+| 浏览器 Web Speech API | 前端直接识别 | 无需服务器 | 兼容性差，部分浏览器不支持 |
+| 服务端 ASR | 录音上传，后端调用 Whisper/FunASR | 兼容性好、可定制 | 需要存储和算力 |
+
+#### 注意
+
+- 请求麦克风权限要有明确提示
+- 录音文件大小、格式、时长限制
+- 音频属于敏感数据，注意存储和删除策略
+- 识别结果先填入输入框，由用户确认后再发送
+- 失败时降级为文字输入
+
+#### 验收标准
+
+- 能录音并转成文字
+- 无权限时有提示
+- 上传失败可重试
+
+---
+
+### 11.7 优先级与里程碑
+
+| 阶段 | 内容 | 依赖 | 价值 |
+|---|---|---|---|
+| M7 | 会话持久化 | 表结构、接口 | 解决刷新丢失、审计 |
+| M8 | 上下文窗口/摘要 | M7 | 控制 token、支持长对话 |
+| M9 | SSE 流式 | 后端 streaming | 体验提升 |
+| M10 | 历史列表/多会话 | M7 | 多任务管理 |
+| M11 | Markdown/代码高亮 | 前端依赖 | 可读性 |
+| M12 | 语音输入 | 浏览器或 ASR | 输入方式扩展 |
+
+建议不要跳过 M7 直接做 M10，否则“多会话”没有存储基础。
+
+---
+
+### 11.8 与 LangGraph Checkpointer 的关系
+
+两者都涉及“会话状态”，需要明确边界：
+
+| 层 | 负责 | 存储 |
+|---|---|---|
+| LangGraph Checkpointer | 图执行状态、断点、人工确认 | Redis/MySQL |
+| 上下文管理模块 | 用户可见消息、标题、列表、审计 | MySQL |
+| 模型上下文 | 本次实际发送的 token 窗口 | 内存 |
+
+原则：
+
+- MySQL 是用户可见历史的真相
+- Checkpointer 是执行状态的真相
+- 不要把两套消息各存一份却不一致
+- 可以用同一个 `thread_id` / `conversation_id` 关联
+
+---
+
+### 11.9 新增接口、表、配置汇总
+
+接口：
+
+```text
+POST   /api/ai/conversations
+GET    /api/ai/conversations
+GET    /api/ai/conversations/{id}/messages
+POST   /api/ai/conversations/{id}/messages
+PATCH  /api/ai/conversations/{id}
+DELETE /api/ai/conversations/{id}
+POST   /api/ai/chat/stream
+```
+
+表：
+
+```text
+ai_conversations
+ai_messages
+```
+
+配置：
+
+```env
+AI_MAX_CONTEXT_TOKENS=120000
+AI_RECENT_MESSAGES=20
+AI_SUMMARY_THRESHOLD_TOKENS=8000
+AI_MAX_OUTPUT_TOKENS=2000
+```
+
+---
+
+### 11.10 风险
+
+- token 成本随历史增长，需要预算和监控
+- 摘要可能失真，关键状态必须以数据库为准
+- 流式输出增加连接管理复杂度
+- Markdown 渲染存在 XSS 风险
+- 语音数据涉及隐私和存储成本
+- 多会话和权限容易产生越权，需要系统测试
+
+---
+
 ## 附录：参考实现顺序（建议）
 
 1. 先把现有 `services` 抽成可复用工具层（不依赖 LLM）
